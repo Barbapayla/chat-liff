@@ -1,25 +1,28 @@
 document.addEventListener('DOMContentLoaded', async () => {
   try {
-    await liff.init({ liffId: '2007964190-lv3NAx5a' }); // 換成你真實的 LIFF ID
-    console.log('LIFF init success');
-
-    // 如果還沒登入就跳 LINE 登入
+    await liff.init({ liffId: '2007964190-lv3NAx5a' }); // 你的 LIFF ID
+    // 未登入就先登入
     if (!liff.isLoggedIn()) {
       liff.login();
       return;
     }
 
-    // 取得使用者資訊
     const profile = await liff.getProfile();
-    console.log('Profile:', profile);
 
-    // 顯示在畫面上
-    document.getElementById('profile').innerHTML = `
+    // 取得/建立容器，避免 null
+    let el = document.getElementById('profile');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'profile';
+      document.body.appendChild(el);
+    }
+
+    el.innerHTML = `
       <p><strong>Display Name:</strong> ${profile.displayName}</p>
-      <img src="${profile.pictureUrl}" alt="profile picture" width="100">
+      ${profile.pictureUrl ? `<img src="${profile.pictureUrl}" alt="profile" width="100">` : ''}
     `;
   } catch (err) {
     console.error('LIFF init failed', err);
-    alert('LIFF 初始化失敗：' + err.message);
+    alert('LIFF 初始化失敗：' + (err?.message || err));
   }
 });
