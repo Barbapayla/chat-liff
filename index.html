@@ -59,16 +59,24 @@
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 
   <script>
-    /************* 設定 *************/
+    /************* 設定（已帶入你的參數） *************/
     const LIFF_ID = "2007964190-lv3NAx5a";
     const SUPABASE_URL = "https://mqnreqlsukmtubvgcfm.supabase.co";
     const SUPABASE_ANON_KEY =
       "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xbnJlcWxzdWttdG51YnZnY2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NzYyNzksImV4cCI6MjA3MTI1MjI3OX0.WVnitC3EIzJANy8eEY6LaCGMV8aoNcxwJQGL5_YIZUc";
 
-    // 你的 Edge Functions（已假設 slug 為 db-read / db-write / line-push）
+    // 你的 Edge Functions（slug：db-read / db-write / line-push）
     const READ_URL  = `${SUPABASE_URL}/functions/v1/db-read`;
     const WRITE_URL = `${SUPABASE_URL}/functions/v1/db-write`;
-    const PUSH_URL  = `${SUPABASE_URL}/functions/v1/line-push`; // 可選：要推播才會用到
+    const PUSH_URL  = `${SUPABASE_URL}/functions/v1/line-push`; // 可選
+
+    // 共用 headers（Edge Functions 常見需求：Authorization + apikey）
+    const BASE_HEADERS = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "apikey": SUPABASE_ANON_KEY,
+      "Cache-Control": "no-store"
+    };
 
     /************* 狀態 *************/
     let me = { id: null, name: "我" };
@@ -77,58 +85,107 @@
     const $msgs = document.getElementById("msgs");
     const $text = document.getElementById("text");
 
-    /************* 進入點 *************/
-    init();
+    let poller = null;
+    let loading = false; // 避免重入
 
-    async function init() {
+    /************* 進入點 *************/
+    (async function init() {
       try {
         await liff.init({ liffId: LIFF_ID });
         document.getElementById("loginBtn").addEventListener("click", loginAndEnter);
-        if (liff.isLoggedIn()) await loginAndEnter();
+
+        if (liff.isLoggedIn()) {
+          await loginAndEnter();
+        }
       } catch (e) {
-        alert("LIFF 初始化失敗：" + (e?.message || e));
+        const msg = e?.message || JSON.stringify(e) || String(e);
+        alert("LIFF 初始化失敗：" + msg);
+        console.error("[LIFF init error]", e);
+      }
+    })();
+
+    async function loginAndEnter() {
+      try {
+        if (!liff.isLoggedIn()) {
+          // 登入後回到同一頁（避免 # 或查詢參數造成重導不一致）
+          return liff.login({ redirectUri: location.origin + location.pathname });
+        }
+
+        const profile = await liff.getProfile();
+        me.id = profile.userId;
+        me.name = profile.displayName || "我";
+        document.getElementById("ctx").textContent =
+          `${me.name}（isInClient: ${liff.isInClient()}）`;
+
+        $landing.style.display = "none";
+        $chat.style.display = "block";
+
+        await loadHistory(true);
+
+        document.getElementById("send").onclick = sendMessage;
+        $text.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") sendMessage();
+        });
+
+        // 啟動輪詢（4 秒一次），避免重複啟動
+        if (!poller) {
+          poller = setInterval(() => loadHistory(false), 4000);
+        }
+
+        // 背景暫停輪詢、回來再重啟
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            if (poller) { clearInterval(poller); poller = null; }
+          } else if (!poller) {
+            loadHistory(false);
+            poller = setInterval(() => loadHistory(false), 4000);
+          }
+        });
+      } catch (e) {
+        const msg = e?.message || JSON.stringify(e) || String(e);
+        alert("登入流程錯誤：" + msg);
+        console.error("[loginAndEnter error]", e);
       }
     }
 
-    async function loginAndEnter() {
-      if (!liff.isLoggedIn()) return liff.login({ redirectUri: location.href.split("#")[0] });
-
-      const profile = await liff.getProfile();
-      me.id = profile.userId;
-      me.name = profile.displayName || "我";
-      document.getElementById("ctx").textContent = `${me.name}（isInClient: ${liff.isInClient()}）`;
-
-      $landing.style.display = "none";
-      $chat.style.display = "block";
-
-      await loadHistory();
-
-      document.getElementById("send").onclick = sendMessage;
-      $text.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
-
-      // 輪詢刷新（4 秒一次）。要用 Realtime 再說一聲我幫你接。
-      setInterval(loadHistory, 4000);
-    }
-
     /************* 讀取訊息（Edge Function） *************/
-    async function loadHistory() {
+    async function loadHistory(firstLoad = false) {
+      if (loading) return;
+      loading = true;
       try {
         const res = await fetch(READ_URL, {
-          headers: {
-            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, // Verify JWT 開啟時必帶
-          },
+          method: "GET",
+          headers: BASE_HEADERS,
+          cache: "no-store"
         });
-        const body = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${body}`);
-        const data = JSON.parse(body);
 
-        // 只在有變化時重繪（簡易）
+        // 允許 204
+        if (res.status === 204) {
+          if (firstLoad) $msgs.innerHTML = "";
+          return;
+        }
+
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${text || ""}`);
+
+        let data;
+        try { data = text ? JSON.parse(text) : []; }
+        catch { data = []; }
+
+        // 重繪
         $msgs.innerHTML = "";
-        for (const m of data) renderMsg(m);
+        if (Array.isArray(data)) {
+          for (const m of data) renderMsg(m);
+        } else if (data) {
+          // 容錯：若回傳單物件
+          renderMsg(data);
+        }
         scrollToBottom();
       } catch (e) {
-        console.error(e);
-        alert("讀取訊息失敗：" + (e?.message || e));
+        console.error("[loadHistory error]", e);
+        // 不用 alert 以免干擾使用
+      } finally {
+        loading = false;
       }
     }
 
@@ -141,39 +198,38 @@
       try {
         const res = await fetch(WRITE_URL, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-          },
+          headers: BASE_HEADERS,
           body: JSON.stringify({
             user_id: me.id,
             display_name: me.name,
-            content,
-          }),
+            content
+          })
         });
-        const body = await res.text();
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${body}`);
-        const { data } = JSON.parse(body);
 
-        // 先本地插入一條，等下一輪輪詢再完整同步
-        renderMsg(data);
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${text || ""}`);
+
+        let payload;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+
+        // 兼容回傳格式：可能是 {data} 或直接物件或陣列
+        const rows = Array.isArray(payload) ? payload
+                   : payload?.data ? (Array.isArray(payload.data) ? payload.data : [payload.data])
+                   : payload ? [payload] : [];
+
+        for (const row of rows) renderMsg(row);
         scrollToBottom();
 
-        // （可選）也讓 Bot 推給自己（PUSH_URL 存在才呼叫）
-        try {
-          if (PUSH_URL) {
-            fetch(PUSH_URL, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-              },
-              body: JSON.stringify({ userId: me.id, text: content }),
-            }).catch(() => {});
-          }
-        } catch (_) {}
+        // （可選）推播給自己（如果你有做 line-push）
+        if (PUSH_URL) {
+          fetch(PUSH_URL, {
+            method: "POST",
+            headers: BASE_HEADERS,
+            body: JSON.stringify({ userId: me.id, text: content })
+          }).catch(() => {});
+        }
       } catch (e) {
-        console.error(e);
+        console.error("[sendMessage error]", e);
         alert("寫入失敗：" + (e?.message || e));
       }
     }
@@ -184,14 +240,21 @@
       const wrap = document.createElement("div");
       const meta = document.createElement("div");
       const bubble = document.createElement("div");
+
       wrap.className = "msg " + (mine ? "me" : "other");
       meta.className = "meta";
+
       const dt = new Date(m.created_at || Date.now());
-      meta.textContent = `${m.display_name || "匿名"} • ${dt.toLocaleTimeString()}`;
+      const who = m.display_name || "匿名";
+      meta.textContent = `${who} • ${dt.toLocaleTimeString()}`;
+
       bubble.textContent = m.content || "";
-      wrap.appendChild(meta); wrap.appendChild(bubble);
+
+      wrap.appendChild(meta);
+      wrap.appendChild(bubble);
       $msgs.appendChild(wrap);
     }
+
     function scrollToBottom(){ $msgs.scrollTop = $msgs.scrollHeight; }
   </script>
 </body>
