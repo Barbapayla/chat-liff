@@ -5,7 +5,7 @@
   <title>即時連線聊天室</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --bg:#0f172a; --card:#111827; --muted:#9ca3af; --line:#06c755; }
+    :root { --bg:#0f172a; --card:#111827; --muted:#9ca3af; --line:#06c755 }
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b1220;color:#e5e7eb}
     .wrap{max-width:820px;margin:0 auto;padding:24px}
@@ -15,10 +15,7 @@
     .sub{color:#9ca3af;margin:0 0 24px}
     .btn{display:inline-flex;align-items:center;gap:8px;background:var(--line);border:none;color:#fff;font-weight:800;padding:12px 18px;border-radius:12px;cursor:pointer}
     .btn:disabled{opacity:.6;cursor:not-allowed}
-    .hint{margin-top:8px;color:#9ca3af;font-size:12px}
-
-    /* Chat */
-    .chat { display:none; }
+    .chat{display:none}
     .chatHeader{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid #1f2937;background:#0c1528}
     .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e}
     .roomTitle{font-weight:800}
@@ -32,19 +29,15 @@
     .input{flex:1;padding:12px 14px;border:1px solid #334155;border-radius:12px;background:#0a1222;color:#e5e7eb}
     .send{padding:12px 16px;border:none;border-radius:12px;background:#2563eb;color:#fff;font-weight:800}
     .tips{padding:10px 16px;background:#0a1222;color:#9ca3af;border-top:1px solid #1f2937}
-
-    .hidden{display:none}
   </style>
 </head>
 <body>
   <div class="wrap">
     <!-- 登入畫面 -->
     <div id="landing" class="card hero">
-      <div class="dot"></div>
       <div class="title">即將進入即時連線聊天室</div>
       <p class="sub">這是一個多人共用的聊天室。請先以 LINE 登入。</p>
       <button id="loginBtn" class="btn">以 LINE 登入</button>
-      <div class="hint">提示：請在 LINE App 內開啟本頁；若在瀏覽器開啟也能登入，但無法使用某些 LINE 內建功能。</div>
     </div>
 
     <!-- 聊天室 -->
@@ -63,16 +56,16 @@
     </div>
   </div>
 
-  <!-- LIFF / Supabase SDK -->
+  <!-- SDKs -->
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script src="https://unpkg.com/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
 
   <script>
-    /*** 設定 ***/
+    /*** 你的設定 ***/
     const LIFF_ID = "2007964190-lv3NAx5a";
     const SUPABASE_URL = "https://mqnreqlsukmtubvgcfm.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xbnJlcWxzdWttdG51YnZnY2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NzYyNzksImV4cCI6MjA3MTI1MjI3OX0.WVnitC3EIzJANy8eEY6LaCGMV8aoNcxwJQGL5_YIZUc";
-    const EDGE_PUSH_URL = "https://mqnreqlsukmtnubvgcfm.supabase.co/functions/v1/smooth-function"; // 可選：如需讓 Bot 推送給自己
+
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     /*** 狀態 ***/
@@ -89,7 +82,6 @@
       try {
         await liff.init({ liffId: LIFF_ID });
         document.getElementById("loginBtn").addEventListener("click", loginAndEnter);
-        // 如果已經登入，直接進聊天室
         if (liff.isLoggedIn()) await loginAndEnter();
       } catch (e) {
         alert("LIFF 初始化失敗：" + (e?.message || e));
@@ -97,49 +89,100 @@
     }
 
     async function loginAndEnter() {
-      if (!liff.isLoggedIn()) {
-        return liff.login({ redirectUri: location.href.split("#")[0] });
-      }
+      if (!liff.isLoggedIn()) return liff.login({ redirectUri: location.href.split("#")[0] });
+
       const profile = await liff.getProfile();
       me.id = profile.userId;
       me.name = profile.displayName || "我";
+
       document.getElementById("ctx").textContent =
         `${me.name}（isInClient: ${liff.isInClient()}）`;
 
-      // 切換畫面
-      $landing.classList.add("hidden");
+      $landing.style.display = "none";
       $chat.style.display = "block";
 
-      // 載入舊訊息 + 訂閱即時
       await loadHistory();
       subscribeRealtime();
 
-      // 綁定送出
-      document.getElementById("send").onclick = sendMessage;
-      $text.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") sendMessage();
-      });
+      document.getElementById("send").onclick = insertMessage; // 綁定強化版 insert
+      $text.addEventListener("keydown", (e) => { if (e.key === "Enter") insertMessage(); });
       $text.focus();
     }
 
-    /*** 載入歷史訊息 ***/
+    /*** 健檢：確認 Supabase 可連線（避免只看到 Failed to fetch） ***/
+    async function pingSupabase() {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+          method: "GET",
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+        });
+        console.log("[pingSupabase]", res.status, res.statusText);
+        return res.ok;
+      } catch (e) {
+        console.error("[pingSupabase] network error:", e);
+        return false;
+      }
+    }
+
+    /*** 強化版：寫入 messages（直接呼叫 REST，錯誤詳列） ***/
+    async function insertMessage() {
+      const ok = await pingSupabase();
+      if (!ok) {
+        alert("❌ 無法連到 Supabase（可能是 CORS/網路被擋）。請改用手機 LINE 開啟或稍後再試。");
+        return;
+      }
+      try {
+        const content = ($text.value || "").trim();
+        if (!content) return;
+        $text.value = "";
+
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify([{
+            user_id: me.id,
+            display_name: me.name,
+            content,
+          }]),
+        });
+
+        const text = await res.text();
+        if (!res.ok) {
+          console.error("[insert REST] status:", res.status, text);
+          alert(`❌ 寫入失敗：HTTP ${res.status}\n${text || "No body"}`);
+          return;
+        }
+
+        console.log("[insert REST] ok:", text);
+        // 由 Realtime 訂閱自動渲染，不用自己加
+      } catch (err) {
+        console.error(err);
+        alert("❌ 寫入失敗：" + (err?.message || err));
+      }
+    }
+
+    /*** 歷史訊息 ***/
     async function loadHistory() {
       const { data, error } = await db
         .from("messages")
         .select("*")
         .order("created_at", { ascending: true })
         .limit(50);
-
-      if (error) {
-        alert("讀取訊息失敗：" + error.message);
-        return;
-      }
+      if (error) return alert("讀取訊息失敗：" + error.message);
       $msgs.innerHTML = "";
       for (const m of data || []) renderMsg(m);
       scrollToBottom();
     }
 
-    /*** 即時訂閱 ***/
+    /*** 即時 ***/
     function subscribeRealtime() {
       db.channel("public:messages")
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
@@ -149,58 +192,21 @@
         .subscribe();
     }
 
-    /*** 送出訊息 ***/
-    async function sendMessage() {
-      const content = ($text.value || "").trim();
-      if (!content) return;
-      $text.value = "";
-
-      // 寫入 DB（所有人即時看到）
-      const { error } = await db.from("messages").insert([{
-        user_id: me.id,
-        display_name: me.name,
-        content
-      }]);
-      if (error) {
-        alert("寫入失敗：" + error.message);
-        return;
-      }
-
-      // （可選）同時請 Bot 推送給自己：若你想在 LINE 聊天室也看到
-      // 注意：你的 Edge Function 需已設定 CORS + Secrets & 驗證
-      try {
-        fetch(EDGE_PUSH_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${SUPABASE_ANON_KEY}` // Verify-JWT 開啟時必帶
-          },
-          body: JSON.stringify({ userId: me.id, text: content })
-        }).catch(() => {});
-      } catch (_) {}
-    }
-
-    /*** 畫訊息 ***/
+    /*** UI ***/
     function renderMsg(m) {
       const mine = m.user_id === me.id;
       const wrap = document.createElement("div");
       const meta = document.createElement("div");
       const bubble = document.createElement("div");
       wrap.className = "msg " + (mine ? "me" : "other");
-
       meta.className = "meta";
       const dt = new Date(m.created_at || Date.now());
       meta.textContent = `${m.display_name || "匿名"} • ${dt.toLocaleTimeString()}`;
-
       bubble.textContent = m.content || "";
-      wrap.appendChild(meta);
-      wrap.appendChild(bubble);
+      wrap.appendChild(meta); wrap.appendChild(bubble);
       $msgs.appendChild(wrap);
     }
-
-    function scrollToBottom() {
-      $msgs.scrollTop = $msgs.scrollHeight;
-    }
+    function scrollToBottom(){ $msgs.scrollTop = $msgs.scrollHeight; }
   </script>
 </body>
 </html>
