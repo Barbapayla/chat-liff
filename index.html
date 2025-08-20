@@ -5,198 +5,124 @@
   <title>LIFF 診斷工具</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, Arial; background:#f7f7f8; margin:0; padding:24px; color:#111; }
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:16px 18px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.04);}
-    .row { display:flex; gap:12px; flex-wrap:wrap; }
-    button { padding:10px 14px; border-radius:10px; border:1px solid #d1d5db; background:#fff; cursor:pointer; }
-    button:active { transform: translateY(1px); }
-    pre, code { background:#0b1020; color:#dbeafe; border-radius:12px; padding:12px; overflow:auto; }
-    .ok { color:#16a34a; font-weight:600; }
-    .ng { color:#dc2626; font-weight:600; }
-    input, textarea { width:100%; padding:10px; border:1px solid #d1d5db; border-radius:10px; }
-    label { font-size:12px; color:#6b7280; }
+    body {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 10px;
+    }
+    .status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 6px;
+    }
+    .error { background: #ffe5e5; color: #c00; }
+    .success { background: #e5ffe5; color: #090; }
+    input, button {
+      margin: 5px 0;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 100%;
+    }
+    button {
+      background: #06c755;
+      color: #fff;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #04a94d;
+    }
   </style>
-  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <!-- 若你要測 Supabase，解開下一行並填入 keys；沒用就可忽略 -->
-  <!-- <script src="https://unpkg.com/@supabase/supabase-js@2"></script> -->
 </head>
 <body>
-  <h1>LIFF 診斷工具</h1>
-  <div class="card">
-    <div id="status">初始化中…</div>
-    <div id="flags"></div>
-  </div>
+  <div class="container">
+    <h1>LIFF 診斷工具</h1>
+    <div id="liff-status" class="status">初始化中...</div>
 
-  <div class="card">
-    <h3>環境變數檢查（僅顯示是否有填）</h3>
+    <h2>環境變數檢查</h2>
     <ul>
-      <li>LIFF_ID: <span id="liffIdFlag"></span></li>
-      <li>SUPABASE_URL: <span id="sbUrlFlag"></span></li>
-      <li>SUPABASE_ANON_KEY: <span id="sbKeyFlag"></span></li>
+      <li>LIFF_ID: 已填</li>
+      <li>SUPABASE_URL: 已填</li>
+      <li>SUPABASE_ANON_KEY: 已填</li>
     </ul>
+
+    <h2>A. 測試 liff.sendMessages()</h2>
+    <input id="msgText" type="text" value="Hello from LIFF!" />
+    <button id="sendBtn">送到 LINE 聊天</button>
+
+    <h2>B. 測試 Supabase Insert</h2>
+    <input id="supabaseText" type="text" value="Hello Wall" />
+    <button id="insertBtn">寫入 messages 資料表</button>
   </div>
 
-  <div class="card">
-    <h3>A. 測 `liff.sendMessages()`（一定要在 LINE App 內）</h3>
-    <label>要送出的文字</label>
-    <input id="lineText" placeholder="Hello from LIFF!" />
-    <div class="row" style="margin-top:8px;">
-      <button id="btnSend">送到 LINE 聊天</button>
-      <button id="btnShare">shareTargetPicker（備用分享）</button>
-      <button id="btnOpenExt">在外部瀏覽器開此頁（for debug）</button>
-    </div>
-    <p id="sendResult"></p>
-  </div>
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <!-- Supabase SDK -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
 
-  <div class="card">
-    <h3>B. 測 Supabase Insert（選用）</h3>
-    <label>訊息內容</label>
-    <input id="sbText" placeholder="Hello Wall" />
-    <div class="row" style="margin-top:8px;">
-      <button id="btnSb">寫入 messages 資料表</button>
-    </div>
-    <p id="sbResult"></p>
-  </div>
+  <script>
+    // ✅ LIFF ID (直接寫死避免未填問題)
+    const LIFF_ID = "2007964190-1v3NAx5a";
 
-  <div class="card">
-    <h3>LIFF Context / Profile / 版本資訊</h3>
-    <pre id="info">...</pre>
-  </div>
+    // ✅ Supabase 設定 (已填入你的 URL)
+    const SUPABASE_URL = "https://mqnreqlsukmtubvgcfm.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xbnJlcWxzdWttdG51YnZnY2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NzYyNzksImV4cCI6MjA3MTI1MjI3OX0.WVnitC3EIzJANy8eEY6LaCGMV8aoNcxwJQGL5_YIZUc"; // ⚠️ 這裡要換成你剛剛 Copy 的 anon public key
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-<script>
-  // ======= 1) 換成你的環境值 =======
-  const LIFF_ID = '<YOUR_LIFF_ID>'; // 例如 2000123456-abcDEF
-  const SUPABASE_URL = '2007964190-lv3NAx5a'; // 例如 https://abcdxxxx.supabase.co
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xbnJlcWxzdWttdG51YnZnY2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU2NzYyNzksImV4cCI6MjA3MTI1MjI3OX0.WVnitC3EIzJANy8eEY6LaCGMV8aoNcxwJQGL5_YIZUc';
-
-  // ======= 2) UI 小工具 =======
-  const qs = (s)=>document.querySelector(s);
-  const statusEl = qs('#status'), flagsEl = qs('#flags'), infoEl = qs('#info');
-
-  function flag(ok){ return ok ? '<span class="ok">✅</span>' : '<span class="ng">❌</span>'; }
-  function showFlags(obj) {
-    flagsEl.innerHTML = `
-      <div>isInClient: ${flag(obj.isInClient)} | isLoggedIn: ${flag(obj.isLoggedIn)} | isApiAvailable(sendMessages): ${flag(obj.canSend)}</div>
-    `;
-  }
-  function setEnvFlags() {
-    qs('#liffIdFlag').innerHTML = LIFF_ID && LIFF_ID.startsWith('<') ? '未填' : '已填';
-    qs('#sbUrlFlag').innerHTML = SUPABASE_URL && !SUPABASE_URL.startsWith('<') ? '已填' : '未填';
-    qs('#sbKeyFlag').innerHTML = SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.startsWith('<') ? '已填' : '未填';
-  }
-
-  // ======= 3) LIFF 初始化 + 狀態顯示 =======
-  async function init() {
-    try {
-      setEnvFlags();
-      await liff.init({ liffId: LIFF_ID });
-
-      if (!liff.isLoggedIn()) {
-        // 先顯示再導去登入，避免看不到畫面
-        statusEl.textContent = '尚未登入，導向 LINE Login 中…';
-        return liff.login({}); // 登入回來後會再次執行 init（頁面重載）
+    // 初始化 LIFF
+    async function initLiff() {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        document.getElementById("liff-status").textContent = "✅ LIFF 初始化成功";
+        document.getElementById("liff-status").className = "status success";
+      } catch (err) {
+        document.getElementById("liff-status").textContent = "❌ LIFF 初始化失敗: " + err.message;
+        document.getElementById("liff-status").className = "status error";
       }
-
-      const isInClient = liff.isInClient();
-      const isLoggedIn = liff.isLoggedIn();
-      const canSend = liff.isApiAvailable('shareTargetPicker') || liff.isApiAvailable('sendMessages');
-
-      showFlags({ isInClient, isLoggedIn, canSend });
-      statusEl.innerHTML = `初始化完成 ${flag(true)}（請特別注意 isInClient 必須是 ✅ 才能 sendMessages）`;
-
-      // 印詳細資訊
-      const ctx = liff.getContext ? liff.getContext() : null;
-      const os = liff.getOS ? liff.getOS() : 'unknown';
-      const lang = liff.getLanguage ? liff.getLanguage() : 'unknown';
-      const ver = liff.getVersion ? liff.getVersion() : 'unknown';
-      let prof = null;
-      try { prof = await liff.getProfile(); } catch (e) { /* 未授權 profile scope 也沒關係 */ }
-
-      infoEl.textContent = JSON.stringify({ ctx, os, lang, ver, profile: prof }, null, 2);
-    } catch (e) {
-      statusEl.innerHTML = `初始化失敗 ${flag(false)}\n\n` + (e?.message || JSON.stringify(e));
-      console.error('LIFF init error:', e);
     }
-  }
 
-  // ======= 4) 送到 LINE（只能在 LIFF 內） =======
-  async function sendToLine() {
-    const el = qs('#sendResult');
-    el.textContent = 'Sending...';
-    try {
-      await liff.init({ liffId: LIFF_ID });
-      if (!liff.isLoggedIn()) return liff.login();
-
+    // 發送訊息
+    document.getElementById("sendBtn").addEventListener("click", async () => {
       if (!liff.isInClient()) {
-        el.innerHTML = '❌ 你目前不在 LINE App 內，`liff.sendMessages()` 不能用。請用 liff URL 在 LINE 裡開啟。';
+        alert("⚠️ 請在 LINE App 內打開");
         return;
       }
-      await liff.sendMessages([{ type: 'text', text: qs('#lineText').value || 'Hello from LIFF!' }]);
-      el.textContent = '✅ 已送出到 LINE 聊天';
-    } catch (e) {
-      el.textContent = '❌ 送出失敗：' + (e?.message || JSON.stringify(e));
-      console.error('sendMessages error:', e);
-    }
-  }
-
-  // ======= 5) 備用：shareTargetPicker（在 LINE 內/外都可能可用） =======
-  async function sharePicker() {
-    const el = qs('#sendResult');
-    el.textContent = 'Opening shareTargetPicker...';
-    try {
-      await liff.init({ liffId: LIFF_ID });
-      if (!liff.isLoggedIn()) return liff.login();
-      if (!liff.isApiAvailable('shareTargetPicker')) {
-        el.textContent = '❌ 此裝置/版本不支援 shareTargetPicker';
-        return;
+      const msg = document.getElementById("msgText").value;
+      try {
+        await liff.sendMessages([{ type: "text", text: msg }]);
+        alert("✅ 已送出訊息: " + msg);
+      } catch (err) {
+        alert("❌ 發送失敗: " + err.message);
       }
-      await liff.shareTargetPicker([{ type: 'text', text: qs('#lineText').value || 'Hello from LIFF!' }]);
-      el.textContent = '✅ shareTargetPicker 完成（或被取消）';
-    } catch (e) {
-      el.textContent = '❌ shareTargetPicker 失敗：' + (e?.message || JSON.stringify(e));
-      console.error('shareTargetPicker error:', e);
-    }
-  }
+    });
 
-  // ======= 6) 外部開啟（幫你驗證目前是不是在 LINE 內）=======
-  function openExternal() {
-    try { liff.openWindow({ url: location.href, external: true }); } catch {}
-  }
-
-  // ======= 7) Supabase 測試（選用） =======
-  async function insertSupabase() {
-    const out = qs('#sbResult');
-    out.textContent = 'Inserting...';
-    try {
-      if (!window.supabase) {
-        out.textContent = '❌ 你沒有載入 supabase-js（請把上面的 <script src=...supabase-js@2> 打開）';
-        return;
+    // Supabase Insert
+    document.getElementById("insertBtn").addEventListener("click", async () => {
+      const text = document.getElementById("supabaseText").value;
+      const { data, error } = await supabaseClient.from("messages").insert([{ content: text }]);
+      if (error) {
+        alert("❌ 寫入失敗: " + error.message);
+      } else {
+        alert("✅ 已寫入 Supabase: " + JSON.stringify(data));
       }
-      if (SUPABASE_URL.startsWith('<') || SUPABASE_ANON_KEY.startsWith('<')) {
-        out.textContent = '❌ 尚未填入 SUPABASE_URL/ANON_KEY';
-        return;
-      }
-      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      const { error } = await supabase.from('messages').insert({
-        text: qs('#sbText').value || 'Hello Wall',
-        created_at: new Date().toISOString()
-      });
-      if (error) throw error;
-      out.textContent = '✅ Insert OK';
-    } catch (e) {
-      out.textContent = '❌ Insert 失敗：' + (e?.message || JSON.stringify(e));
-      console.error('Supabase insert error:', e);
-    }
-  }
+    });
 
-  // 綁定事件
-  window.addEventListener('DOMContentLoaded', () => {
-    qs('#btnSend').addEventListener('click', sendToLine);
-    qs('#btnShare').addEventListener('click', sharePicker);
-    qs('#btnOpenExt').addEventListener('click', openExternal);
-    qs('#btnSb').addEventListener('click', insertSupabase);
-    init();
-  });
-</script>
+    initLiff();
+  </script>
 </body>
 </html>
